@@ -61,6 +61,8 @@ jobs:
         $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
     - name: ساخت APK
+      env:
+        FLET_FORCE_FLUTTER_INSTALL: 1  # ✅ این خط را اضافه کنید
       run: |
         flutter config --no-analytics
         flet build apk --verbose
