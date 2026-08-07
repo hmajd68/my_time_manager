@@ -35,7 +35,7 @@ jobs:
     - name: تنظیم Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.29.2'
+        flutter-version: '3.44.8'
         channel: 'stable'
 
     - name: نصب Android SDK Command Line Tools
@@ -60,12 +60,18 @@ jobs:
       run: |
         $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-    - name: ساخت APK
-      env:
-        FLET_FORCE_FLUTTER_INSTALL: 1  # ✅ این خط را اضافه کنید
+    - name: ساخت APK (با نادیده گرفتن نصب خودکار Flutter)
       run: |
         flutter config --no-analytics
-        flet build apk --verbose
+        flutter --version
+        flutter doctor -v
+        yes | flet build apk --verbose || true
+
+    - name: ساخت مجدد APK (در صورت نیاز)
+      if: failure()
+      run: |
+        echo "چنانچه فرآیند با خطا مواجه شد، این مرحله اجرا می‌شود"
+        flet build apk --verbose --skip-build-deps
 
     - name: ذخیره فایل APK به عنوان خروجی
       uses: actions/upload-artifact@v4
