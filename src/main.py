@@ -176,7 +176,7 @@ class Gamification:
         new_level = self.points // 100 + 1
         if new_level > self.level:
             self.level = new_level
-            self.add_badge(f"سطح {self.level} 🏅")
+            self.add_badge(f"سطح {self.level}")
             return True
         return False
     
@@ -240,11 +240,11 @@ class HabitManager:
                 )
         self.load()
 
-# ============= اپلیکیشن اصلی با طراحی عاشقانه =============
+# ============= اپلیکیشن اصلی =============
 
 async def main(page: ft.Page):
     # تنظیمات صفحه
-    page.title = "💖 مدیریت زمان عاشقانه"
+    page.title = "مدیریت زمان عاشقانه"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
     page.scroll = ft.ScrollMode.AUTO
@@ -258,12 +258,29 @@ async def main(page: ft.Page):
     gamification = Gamification(db)
     habit_manager = HabitManager(db)
     
+    # ===== متغیرهای صفحه‌ها =====
+    task_list = ft.Column(spacing=10, scroll=ft.ScrollMode.AUTO)
+    habit_list = ft.Column(spacing=10, scroll=ft.ScrollMode.AUTO)
+    
+    # ===== توابع کمکی =====
+    def close_dialog():
+        if page.dialog:
+            page.dialog.open = False
+            page.update()
+    
+    def show_snackbar(message):
+        page.snack_bar = ft.SnackBar(
+            ft.Text(message, rtl=True),
+            bgcolor=ft.Colors.PINK_700
+        )
+        page.snack_bar.open = True
+        page.update()
+    
     # ===== صفحه داشبورد =====
     def create_dashboard():
         stats = task_manager.get_stats()
         g_status = gamification.get_status()
         
-        # هدر عاشقانه
         header = ft.Container(
             content=ft.Column([
                 ft.Text("💖 عشق من، امروز چطور می‌خواهی وقتت رو مدیریت کنی؟", 
@@ -276,7 +293,6 @@ async def main(page: ft.Page):
             border_radius=10
         )
         
-        # کارت‌های آماری با طراحی عاشقانه
         cards = ft.Row([
             ft.Card(
                 ft.Container(
@@ -313,7 +329,6 @@ async def main(page: ft.Page):
             ),
         ], alignment=ft.MainAxisAlignment.CENTER)
         
-        # نوار پیشرفت
         progress = ft.Container(
             content=ft.Column([
                 ft.Text(f"💕 پیشرفت عشق: {stats['completion_rate']:.1f}%", rtl=True, 
@@ -328,7 +343,6 @@ async def main(page: ft.Page):
             padding=10
         )
         
-        # کارت گیمیفیکیشن عاشقانه
         gamification_card = ft.Card(
             ft.Container(
                 ft.Column([
@@ -362,15 +376,12 @@ async def main(page: ft.Page):
         ])
     
     # ===== صفحه کارها =====
-    task_list = ft.Column(spacing=10, scroll=ft.ScrollMode.AUTO)
-    
     def add_task_dialog():
         title_input = ft.TextField(
             hint_text="💭 چکار می‌خواهی انجام بدی؟", 
             rtl=True,
             border_color=ft.Colors.PINK_400,
             focused_border_color=ft.Colors.PINK_700,
-            prefix_icon="💝"
         )
         category_dropdown = ft.Dropdown(
             options=[
@@ -426,23 +437,13 @@ async def main(page: ft.Page):
         dialog.open = True
         page.update()
     
-    def close_dialog():
-        if page.dialog:
-            page.dialog.open = False
-            page.update()
-    
     def add_task(title, category, priority, eisenhower):
         if title and title.strip():
             task_manager.add(title.strip(), category, priority, eisenhower)
             gamification.add_points(5)
             close_dialog()
             update_task_list()
-            page.snack_bar = ft.SnackBar(
-                ft.Text("💕 کار جدید اضافه شد! +۵ امتیاز عشق"),
-                bgcolor=ft.Colors.PINK_700
-            )
-            page.snack_bar.open = True
-            page.update()
+            show_snackbar("💕 کار جدید اضافه شد! +۵ امتیاز عشق")
     
     def update_task_list():
         task_list.controls.clear()
@@ -487,7 +488,7 @@ async def main(page: ft.Page):
                             ])
                         ], expand=True),
                         ft.IconButton(
-                            icon="💔",
+                            icon="DELETE",
                             icon_color=ft.Colors.RED_400,
                             on_click=lambda e, t=task: delete_task(t['id'])
                         )
@@ -509,25 +510,19 @@ async def main(page: ft.Page):
         done = task_manager.toggle(task_id)
         if done:
             gamification.add_points(10)
-            page.snack_bar = ft.SnackBar(
-                ft.Text("🎉 +۱۰ امتیاز عشق! به خودت افتخار کن!"),
-                bgcolor=ft.Colors.PINK_700
-            )
-            page.snack_bar.open = True
+            show_snackbar("🎉 +۱۰ امتیاز عشق! به خودت افتخار کن!")
         update_task_list()
-        page.update()
     
     def delete_task(task_id):
         task_manager.delete(task_id)
         update_task_list()
-        page.update()
     
     def create_tasks_page():
         return ft.Column([
             ft.Row([
                 ft.Text("💕 کارهای روزانه", size=24, weight=ft.FontWeight.BOLD, color=ft.Colors.PINK_700),
                 ft.IconButton(
-                    icon="💝",
+                    icon="ADD",
                     icon_size=30,
                     icon_color=ft.Colors.PINK_700,
                     on_click=lambda _: add_task_dialog()
@@ -538,8 +533,6 @@ async def main(page: ft.Page):
         ])
     
     # ===== صفحه عادت‌ها =====
-    habit_list = ft.Column(spacing=10, scroll=ft.ScrollMode.AUTO)
-    
     def add_habit_dialog():
         name_input = ft.TextField(hint_text="💪 عادت جدید...", rtl=True, border_color=ft.Colors.PINK_400)
         
@@ -547,7 +540,7 @@ async def main(page: ft.Page):
             title=ft.Text("💖 عادت جدید", rtl=True, color=ft.Colors.PINK_700),
             content=ft.Column([name_input], tight=True),
             actions=[
-                ft.TextButton("❌ لغو", on_click=lambda _: close_habit_dialog()),
+                ft.TextButton("❌ لغو", on_click=lambda _: close_dialog()),
                 ft.TextButton("💕 افزودن", on_click=lambda _: add_habit(name_input.value)),
             ]
         )
@@ -555,23 +548,13 @@ async def main(page: ft.Page):
         dialog.open = True
         page.update()
     
-    def close_habit_dialog():
-        if page.dialog:
-            page.dialog.open = False
-            page.update()
-    
     def add_habit(name):
         if name and name.strip():
             habit_manager.add(name.strip())
             gamification.add_points(10)
-            close_habit_dialog()
+            close_dialog()
             update_habit_list()
-            page.snack_bar = ft.SnackBar(
-                ft.Text("💪 عادت جدید اضافه شد! +۱۰ امتیاز عشق"),
-                bgcolor=ft.Colors.PINK_700
-            )
-            page.snack_bar.open = True
-            page.update()
+            show_snackbar("💪 عادت جدید اضافه شد! +۱۰ امتیاز عشق")
     
     def update_habit_list():
         habit_list.controls.clear()
@@ -584,7 +567,7 @@ async def main(page: ft.Page):
                         ft.Row([
                             ft.Text(f"🔥 {habit['streak']} روز", size=14, color=ft.Colors.ORANGE_700),
                             ft.IconButton(
-                                icon="✅",
+                                icon="CHECK",
                                 icon_color=ft.Colors.GREEN_700,
                                 on_click=lambda e, h=habit: mark_habit_done(h['id'])
                             )
@@ -607,19 +590,14 @@ async def main(page: ft.Page):
         habit_manager.mark_done(habit_id)
         gamification.add_points(5)
         update_habit_list()
-        page.snack_bar = ft.SnackBar(
-            ft.Text("💪 عادت ثبت شد! +۵ امتیاز عشق"),
-            bgcolor=ft.Colors.PINK_700
-        )
-        page.snack_bar.open = True
-        page.update()
+        show_snackbar("💪 عادت ثبت شد! +۵ امتیاز عشق")
     
     def create_habits_page():
         return ft.Column([
             ft.Row([
                 ft.Text("💪 عادت‌های من", size=24, weight=ft.FontWeight.BOLD, color=ft.Colors.PINK_700),
                 ft.IconButton(
-                    icon="💝",
+                    icon="ADD",
                     icon_size=30,
                     icon_color=ft.Colors.PINK_700,
                     on_click=lambda _: add_habit_dialog()
@@ -630,47 +608,53 @@ async def main(page: ft.Page):
         ])
     
     # ===== صفحه پومودورو =====
-    def create_pomodoro_page():
-        timer_display = ft.Text("25:00", size=60, weight=ft.FontWeight.BOLD, color=ft.Colors.PINK_700)
+    timer_display = ft.Text("25:00", size=60, weight=ft.FontWeight.BOLD, color=ft.Colors.PINK_700)
+    is_running = False
+    is_work = True
+    remaining = 25 * 60
+    sessions = 0
+    
+    def update_display():
+        minutes = remaining // 60
+        seconds = remaining % 60
+        timer_display.value = f"{minutes:02d}:{seconds:02d}"
+        timer_display.update()
+    
+    def start_timer(e):
+        nonlocal is_running
+        if not is_running:
+            is_running = True
+            thread = threading.Thread(target=run_timer, daemon=True)
+            thread.start()
+    
+    def run_timer():
+        nonlocal remaining, is_running, is_work, sessions
+        while is_running and remaining > 0:
+            time.sleep(1)
+            remaining -= 1
+            update_display()
+        
+        if remaining == 0 and is_running:
+            sessions += 1
+            gamification.add_points(10)
+            is_work = not is_work
+            remaining = 25 * 60 if is_work else 5 * 60
+            update_display()
+            show_snackbar("💕 زمان استراحت!" if not is_work else "💕 زمان تمرکز!")
+            start_timer(None)
+    
+    def stop_timer():
+        nonlocal is_running
+        is_running = False
+    
+    def reset_timer():
+        nonlocal remaining, is_running, is_work
         is_running = False
         is_work = True
         remaining = 25 * 60
-        sessions = 0
-        
-        def update_display():
-            minutes = remaining // 60
-            seconds = remaining % 60
-            timer_display.value = f"{minutes:02d}:{seconds:02d}"
-            timer_display.update()
-        
-        def start_timer(e):
-            nonlocal is_running
-            if not is_running:
-                is_running = True
-                thread = threading.Thread(target=run_timer, daemon=True)
-                thread.start()
-        
-        def run_timer():
-            nonlocal remaining, is_running, is_work, sessions
-            while is_running and remaining > 0:
-                time.sleep(1)
-                remaining -= 1
-                update_display()
-            
-            if remaining == 0 and is_running:
-                sessions += 1
-                gamification.add_points(10)
-                is_work = not is_work
-                remaining = 25 * 60 if is_work else 5 * 60
-                update_display()
-                page.snack_bar = ft.SnackBar(
-                    ft.Text("💕 زمان استراحت!" if not is_work else "💕 زمان تمرکز!"),
-                    bgcolor=ft.Colors.PINK_700
-                )
-                page.snack_bar.open = True
-                page.update()
-                start_timer(None)
-        
+        update_display()
+    
+    def create_pomodoro_page():
         return ft.Column([
             ft.Text("🍅 پومودورو عاشقانه", size=24, weight=ft.FontWeight.BOLD, color=ft.Colors.PINK_700),
             ft.Divider(color=ft.Colors.PINK_200),
@@ -680,19 +664,19 @@ async def main(page: ft.Page):
                     ft.Text(f"🌸 {sessions} جلسه امروز", size=16, color=ft.Colors.PURPLE_600),
                     ft.Row([
                         ft.IconButton(
-                            icon="▶️",
+                            icon="PLAY_ARROW",
                             icon_size=40,
                             icon_color=ft.Colors.PINK_700,
                             on_click=start_timer
                         ),
                         ft.IconButton(
-                            icon="⏹️",
+                            icon="STOP",
                             icon_size=40,
                             icon_color=ft.Colors.RED_400,
                             on_click=lambda _: stop_timer()
                         ),
                         ft.IconButton(
-                            icon="🔄",
+                            icon="REFRESH",
                             icon_size=40,
                             icon_color=ft.Colors.ORANGE_400,
                             on_click=lambda _: reset_timer()
@@ -708,15 +692,30 @@ async def main(page: ft.Page):
         ])
     
     # ===== صفحه تنظیمات =====
+    def toggle_theme(e):
+        if e.control.value:
+            page.theme_mode = ft.ThemeMode.DARK
+            page.bgcolor = ft.Colors.GREY_900
+        else:
+            page.theme_mode = ft.ThemeMode.LIGHT
+            page.bgcolor = ft.Colors.PINK_50
+        page.update()
+    
+    def backup_data():
+        import shutil
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        shutil.copy('lovely_tasks.db', f'love_backup_{timestamp}.db')
+        show_snackbar("💕 پشتیبان‌گیری از عشق‌ها انجام شد!")
+    
     def create_settings_page():
         theme_toggle = ft.Switch(
             value=False,
-            on_change=lambda e: toggle_theme(e),
+            on_change=toggle_theme,
             label="🌙 حالت شب"
         )
         
         backup_button = ft.ElevatedButton(
-            "💾 پشتیبان‌گیری از عشق‌ها",
+            "💾 پشتیبان‌گیری",
             on_click=lambda _: backup_data(),
             bgcolor=ft.Colors.PINK_700,
             color=ft.Colors.WHITE
@@ -755,26 +754,6 @@ async def main(page: ft.Page):
             ),
         ])
     
-    def toggle_theme(e):
-        if e.control.value:
-            page.theme_mode = ft.ThemeMode.DARK
-            page.bgcolor = ft.Colors.GREY_900
-        else:
-            page.theme_mode = ft.ThemeMode.LIGHT
-            page.bgcolor = ft.Colors.PINK_50
-        page.update()
-    
-    def backup_data():
-        import shutil
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        shutil.copy('lovely_tasks.db', f'love_backup_{timestamp}.db')
-        page.snack_bar = ft.SnackBar(
-            ft.Text("💕 پشتیبان‌گیری از عشق‌ها انجام شد!"),
-            bgcolor=ft.Colors.PINK_700
-        )
-        page.snack_bar.open = True
-        page.update()
-    
     # ===== ناوبری اصلی =====
     def change_page(e):
         page.controls.clear()
@@ -786,11 +765,11 @@ async def main(page: ft.Page):
     
     nav_bar = ft.NavigationBar(
         destinations=[
-            ft.NavigationDestination(icon="💖", label="خانه"),
-            ft.NavigationDestination(icon="📋", label="کارها"),
-            ft.NavigationDestination(icon="💪", label="عادت‌ها"),
-            ft.NavigationDestination(icon="🍅", label="پومودورو"),
-            ft.NavigationDestination(icon="⚙️", label="تنظیمات"),
+            ft.NavigationDestination(icon="HOME", label="خانه"),
+            ft.NavigationDestination(icon="LIST", label="کارها"),
+            ft.NavigationDestination(icon="STAR", label="عادت‌ها"),
+            ft.NavigationDestination(icon="TIMER", label="پومودورو"),
+            ft.NavigationDestination(icon="SETTINGS", label="تنظیمات"),
         ],
         selected_index=0,
         on_change=change_page,
@@ -798,6 +777,7 @@ async def main(page: ft.Page):
         elevation=5
     )
     
+    # اجرای اولیه
     page.add(nav_bar)
     page.add(create_dashboard())
     update_task_list()
