@@ -316,7 +316,6 @@ class Gamification:
 class PersianCalendar:
     @staticmethod
     def get_persian_date():
-        # تبدیل تاریخ میلادی به شمسی
         now = datetime.now()
         return f"{now.year}-{now.month:02d}-{now.day:02d}"
     
@@ -339,7 +338,7 @@ class TaskPage:
             hint_text="جستجوی کارها...",
             width=200,
             on_change=self.filter_tasks,
-            prefix_icon=ft.icons.SEARCH
+            prefix_icon="SEARCH"  # ✅ اصلاح شده
         )
         self.filter_dropdown = ft.Dropdown(
             options=[
@@ -355,7 +354,6 @@ class TaskPage:
         self.build()
     
     def build(self):
-        # نوار بالا
         top_row = ft.Row([
             ft.Text("📋 کارها", size=24, weight=ft.FontWeight.BOLD),
             ft.Row([
@@ -364,14 +362,12 @@ class TaskPage:
             ])
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
         
-        # دکمه افزودن کار
         add_button = ft.FloatingActionButton(
-            icon=ft.icons.ADD,
+            icon="ADD",  # ✅ اصلاح شده
             bgcolor=ft.Colors.BLUE_700,
             on_click=lambda _: self.show_add_task_dialog()
         )
         
-        # پنل فیلترهای سریع
         quick_filters = ft.Row([
             ft.Chip(
                 label=ft.Text("همه"),
@@ -530,7 +526,7 @@ class TaskPage:
                         ], spacing=2, expand=True),
                         ft.Row([
                             ft.IconButton(
-                                icon=ft.icons.DELETE_OUTLINE,
+                                icon="DELETE_OUTLINE",  # ✅ اصلاح شده
                                 icon_color=ft.Colors.RED_400,
                                 icon_size=20,
                                 on_click=lambda e, t=task: self.delete_task(t['id']),
@@ -582,7 +578,6 @@ class TaskPage:
             filtered_tasks = [t for t in filtered_tasks if t['done']]
         
         for task in filtered_tasks:
-            # نمایش کارها
             pass
         self.update_task_list()
     
@@ -591,11 +586,11 @@ class TaskPage:
     
     def get_category_icon(self, category):
         icons = {
-            "کار": "WORK",
-            "شخصی": "PERSON",
-            "مطالعه": "SCHOOL",
-            "سلامت": "FAVORITE",
-            "سایر": "ADD_TASK"
+            "کار": "WORK",  # ✅ اصلاح شده
+            "شخصی": "PERSON",  # ✅ اصلاح شده
+            "مطالعه": "SCHOOL",  # ✅ اصلاح شده
+            "سلامت": "FAVORITE",  # ✅ اصلاح شده
+            "سایر": "ADD_TASK"  # ✅ اصلاح شده
         }
         return icons.get(category, "ADD_TASK")
 
@@ -612,7 +607,6 @@ class DashboardPage:
         stats = self.task_manager.get_stats()
         g_status = self.gamification.get_status()
         
-        # کارت آماری
         stat_cards = ft.Row([
             ft.Card(
                 content=ft.Container(
@@ -646,7 +640,6 @@ class DashboardPage:
             ),
         ], alignment=ft.MainAxisAlignment.CENTER)
         
-        # نوار پیشرفت
         progress = ft.Column([
             ft.Text(f"📈 پیشرفت: {stats['completion_rate']:.1f}%", rtl=True),
             ft.ProgressBar(
@@ -657,7 +650,6 @@ class DashboardPage:
             )
         ], spacing=5)
         
-        # کارت گیمیفیکیشن
         gamification_card = ft.Card(
             content=ft.Container(
                 content=ft.Column([
@@ -676,7 +668,6 @@ class DashboardPage:
             )
         )
         
-        # کارت تایمر
         timer_card = ft.Card(
             content=ft.Container(
                 content=ft.Column([
@@ -684,17 +675,17 @@ class DashboardPage:
                     ft.Text(self.timer.get_time_string(), size=36, weight=ft.FontWeight.BOLD),
                     ft.Row([
                         ft.IconButton(
-                            icon=ft.icons.PLAY_ARROW,
+                            icon="PLAY_ARROW",  # ✅ اصلاح شده
                             on_click=lambda _: self.timer.start(lambda: self.update_timer_display()),
                             icon_color=ft.Colors.GREEN_700
                         ),
                         ft.IconButton(
-                            icon=ft.icons.STOP,
+                            icon="STOP",  # ✅ اصلاح شده
                             on_click=lambda _: self.timer.stop(),
                             icon_color=ft.Colors.RED_700
                         ),
                         ft.IconButton(
-                            icon=ft.icons.REFRESH,
+                            icon="REFRESH",  # ✅ اصلاح شده
                             on_click=lambda _: self.timer.reset(),
                             icon_color=ft.Colors.ORANGE_700
                         ),
@@ -705,7 +696,6 @@ class DashboardPage:
             )
         )
         
-        # کارهای امروز
         today_tasks = self.task_manager.get_today_tasks()
         today_card = ft.Card(
             content=ft.Container(
@@ -719,7 +709,6 @@ class DashboardPage:
             )
         )
         
-        # کارهای سررسید شده
         upcoming = self.task_manager.get_upcoming_deadlines()
         upcoming_card = ft.Card(
             content=ft.Container(
@@ -744,7 +733,6 @@ class DashboardPage:
         )
     
     def update_timer_display(self):
-        # به‌روزرسانی نمایش تایمر
         pass
 
 class CalendarPage:
@@ -756,7 +744,6 @@ class CalendarPage:
         self.build()
     
     def build(self):
-        # تقویم ساده با تاریخ امروز
         today = datetime.now()
         persian_date = PersianCalendar.get_persian_date()
         persian_month = PersianCalendar.get_persian_month_name(today.month)
@@ -881,19 +868,16 @@ async def main(page: ft.Page):
     page.rtl = True
     page.bgcolor = ft.Colors.GREY_50
     
-    # راه‌اندازی دیتابیس و کلاس‌ها
     db = Database()
     task_manager = TaskManager(db)
     gamification = Gamification(db)
     timer = PomodoroTimer(page, db)
     
-    # ایجاد صفحه‌ها
     task_page = TaskPage(page, task_manager, gamification, db)
     dashboard_page = DashboardPage(page, task_manager, gamification, timer, db)
     calendar_page = CalendarPage(page, task_manager, db)
     settings_page = SettingsPage(page, db)
     
-    # ناوبری با Bottom Navigation
     def change_page(e):
         page.controls.clear()
         page.add(nav_bar)
@@ -911,10 +895,10 @@ async def main(page: ft.Page):
     
     nav_bar = ft.NavigationBar(
         destinations=[
-            ft.NavigationDestination(icon=ft.icons.DASHBOARD, label="داشبورد"),
-            ft.NavigationDestination(icon=ft.icons.LIST_ALT, label="کارها"),
-            ft.NavigationDestination(icon=ft.icons.CALENDAR_MONTH, label="تقویم"),
-            ft.NavigationDestination(icon=ft.icons.SETTINGS, label="تنظیمات"),
+            ft.NavigationDestination(icon="DASHBOARD", label="داشبورد"),  # ✅ اصلاح شده
+            ft.NavigationDestination(icon="LIST_ALT", label="کارها"),  # ✅ اصلاح شده
+            ft.NavigationDestination(icon="CALENDAR_MONTH", label="تقویم"),  # ✅ اصلاح شده
+            ft.NavigationDestination(icon="SETTINGS", label="تنظیمات"),  # ✅ اصلاح شده
         ],
         selected_index=0,
         on_change=change_page,
@@ -922,7 +906,6 @@ async def main(page: ft.Page):
         elevation=5
     )
     
-    # صفحه پیش‌فرض
     page.add(nav_bar)
     page.add(dashboard_page.content if hasattr(dashboard_page, 'content') else dashboard_page)
     page.update()
