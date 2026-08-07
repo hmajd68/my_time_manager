@@ -38,11 +38,27 @@ jobs:
         flutter-version: '3.29.2'
         channel: 'stable'
 
-    - name: نصب Android SDK و پذیرش مجوزها
+    - name: نصب Android SDK Command Line Tools
       run: |
         sudo apt-get update
         sudo apt-get install -y curl unzip
-        yes | sdkmanager --licenses
+        mkdir -p $HOME/android-sdk/cmdline-tools
+        cd $HOME/android-sdk/cmdline-tools
+        curl -L -o commandlinetools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+        unzip -q commandlinetools.zip
+        rm commandlinetools.zip
+        mv cmdline-tools latest
+        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
+
+    - name: پذیرش مجوزهای Android SDK
+      run: |
+        yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
+
+    - name: نصب پلتفرم‌های Android SDK
+      run: |
+        $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
     - name: ساخت APK
       run: |
