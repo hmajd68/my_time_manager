@@ -1,23 +1,16 @@
 [project]
 name = "my-time-manager"
 version = "0.1.0"
-description = "اپلیکیشن مدیریت زمان حرفه‌ای با قابلیت‌های پیشرفته"
-readme = "README.md"
+description = "اپلیکیشن مدیریت زمان"
 requires-python = ">=3.9"
-authors = [
-    { name = "hmajd68", email = "h.majd90@gmail.com" }
-]
 dependencies = [
     "flet==0.28.3",
-    "persian-datepicker",
-    "jdatetime"
+    "persian-datepicker"
 ]
 
 [tool.flet]
 org = "com.hmajd68"
 product = "مدیریت زمان"
-company = "hmajd68"
-copyright = "Copyright (C) 2026 by hmajd68"
 
 [tool.flet.app]
 path = "src"
@@ -25,15 +18,3 @@ path = "src"
 [tool.flet.android.permission]
 "android.permission.POST_NOTIFICATIONS" = true
 "android.permission.VIBRATE" = true
-"android.permission.RECEIVE_BOOT_COMPLETED" = true
-
-[tool.uv]
-dev-dependencies = [
-    "flet[all]==0.28.3",
-]
-
-[tool.poetry]
-package-mode = false
-
-[tool.poetry.group.dev.dependencies]
-flet = {extras = ["all"], version = "0.28.3"}

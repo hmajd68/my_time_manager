@@ -4,9 +4,8 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta
-import jdatetime
+import calendar
 import sqlite3
-from persian_datepicker import PersianDatePicker
 
 # ============= دیتابیس SQLite =============
 
@@ -80,7 +79,7 @@ class TaskManager:
             })
     
     def add(self, title, category="سایر", priority="متوسط", deadline=None, reminder=None, notes=""):
-        now = jdatetime.date.today().strftime("%Y-%m-%d")
+        now = datetime.now().strftime("%Y-%m-%d")
         self.db.execute(
             'INSERT INTO tasks (title, category, priority, deadline, created, reminder, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
             (title, category, priority, deadline, now, reminder, notes)
@@ -127,17 +126,20 @@ class TaskManager:
         }
     
     def get_today_tasks(self):
-        today = jdatetime.date.today().strftime("%Y-%m-%d")
+        today = datetime.now().strftime("%Y-%m-%d")
         return [t for t in self.tasks if t.get('created') == today and not t['done']]
     
     def get_upcoming_deadlines(self):
-        today = jdatetime.date.today()
+        today = datetime.now().date()
         upcoming = []
         for task in self.tasks:
             if task.get('deadline') and not task['done']:
-                deadline_date = jdatetime.datetime.strptime(task['deadline'], "%Y-%m-%d").date()
-                if 0 <= (deadline_date - today).days <= 7:
-                    upcoming.append(task)
+                try:
+                    deadline_date = datetime.strptime(task['deadline'], "%Y-%m-%d").date()
+                    if 0 <= (deadline_date - today).days <= 7:
+                        upcoming.append(task)
+                except:
+                    pass
         return upcoming
 
 class PomodoroTimer:
@@ -207,7 +209,7 @@ class PomodoroTimer:
         self.start()
     
     def save_session(self):
-        today = jdatetime.date.today().strftime("%Y-%m-%d")
+        today = datetime.now().strftime("%Y-%m-%d")
         self.db.cursor.execute(
             'SELECT sessions, total_time FROM pomodoro_sessions WHERE date = ?',
             (today,)
@@ -230,7 +232,7 @@ class PomodoroTimer:
         return f"{minutes:02d}:{seconds:02d}"
     
     def get_today_sessions(self):
-        today = jdatetime.date.today().strftime("%Y-%m-%d")
+        today = datetime.now().strftime("%Y-%m-%d")
         self.db.cursor.execute(
             'SELECT sessions, total_time FROM pomodoro_sessions WHERE date = ?',
             (today,)
@@ -308,6 +310,21 @@ class Gamification:
             'streak': self.streak,
             'badges': self.badges
         }
+
+# ============= کلاس Calendar =============
+
+class PersianCalendar:
+    @staticmethod
+    def get_persian_date():
+        # تبدیل تاریخ میلادی به شمسی
+        now = datetime.now()
+        return f"{now.year}-{now.month:02d}-{now.day:02d}"
+    
+    @staticmethod
+    def get_persian_month_name(month):
+        months = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
+                  'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند']
+        return months[month - 1] if 1 <= month <= 12 else ""
 
 # ============= صفحه‌های برنامه =============
 
@@ -735,32 +752,36 @@ class CalendarPage:
         self.page = page
         self.task_manager = task_manager
         self.db = db
-        self.selected_date = jdatetime.date.today()
+        self.selected_date = datetime.now().strftime("%Y-%m-%d")
         self.build()
     
     def build(self):
-        def on_date_selected(e):
-            self.selected_date = e.data
-            self.show_tasks_for_date()
-        
-        picker = PersianDatePicker(on_select=on_date_selected)
+        # تقویم ساده با تاریخ امروز
+        today = datetime.now()
+        persian_date = PersianCalendar.get_persian_date()
+        persian_month = PersianCalendar.get_persian_month_name(today.month)
         
         self.page.add(
             ft.Text("📅 تقویم", size=24, weight=ft.FontWeight.BOLD),
-            ft.ElevatedButton(
-                "انتخاب تاریخ",
-                on_click=lambda _: self.page.open(picker)
-            ),
-            ft.Divider(height=10),
-            self.tasks_container()
+            ft.Card(
+                content=ft.Container(
+                    content=ft.Column([
+                        ft.Text(f"تاریخ امروز: {persian_date}", size=18, rtl=True),
+                        ft.Text(f"{today.year} {persian_month} {today.day}", size=16, rtl=True),
+                        ft.Divider(height=10),
+                        ft.Text("📌 کارهای امروز", size=16, weight=ft.FontWeight.BOLD, rtl=True),
+                        self.tasks_container()
+                    ]),
+                    padding=15
+                )
+            )
         )
     
     def tasks_container(self):
-        # نمایش کارهای تاریخ انتخاب شده
-        tasks = [t for t in self.task_manager.tasks if t.get('created') == self.selected_date.strftime("%Y-%m-%d")]
+        today = datetime.now().strftime("%Y-%m-%d")
+        tasks = [t for t in self.task_manager.tasks if t.get('created') == today]
         
         return ft.Column([
-            ft.Text(f"📌 کارهای {self.selected_date.strftime('%Y/%m/%d')}", size=18, weight=ft.FontWeight.BOLD),
             ft.Column([
                 ft.Text(f"• {task['title']}", rtl=True) for task in tasks
             ]) if tasks else ft.Text("📭 هیچ کاری در این تاریخ نیست!", rtl=True, color=ft.Colors.GREY_500)
@@ -812,7 +833,7 @@ class SettingsPage:
             ft.Card(
                 content=ft.Container(
                     content=ft.Column([
-                        ft.Text("📊 آمار پیشرفته", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Text("📊 آمار پیشرفته", size=18, weight=ft.FontWeight.BOLD, rtl=True),
                         ft.Text("تعداد کل کارها: ...", rtl=True),
                         ft.Text("میانگین کارهای روزانه: ...", rtl=True),
                         ft.Text("بیشترین دسته بندی: ...", rtl=True),
