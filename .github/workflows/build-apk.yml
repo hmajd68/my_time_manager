@@ -23,8 +23,12 @@ jobs:
     - name: نصب وابستگی‌ها
       run: |
         python -m pip install --upgrade pip
-        pip install flet
-        pip install persian-datepicker jdatetime
+        if [ -f "requirements.txt" ]; then
+          pip install -r requirements.txt
+        else
+          pip install flet
+          pip install persian-datepicker jdatetime
+        fi
 
     - name: تنظیم Java
       uses: actions/setup-java@v5
@@ -60,22 +64,26 @@ jobs:
       run: |
         $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-    - name: ساخت APK (با نادیده گرفتن نصب خودکار Flutter)
+    - name: ساخت APK
+      env:
+        FLET_FORCE_FLUTTER_INSTALL: 1
+        FLET_ANDROID_SDK_PATH: ${{ env.ANDROID_HOME }}
       run: |
         flutter config --no-analytics
-        flutter --version
         flutter doctor -v
+        cd src
         yes | flet build apk --verbose || true
 
     - name: ساخت مجدد APK (در صورت نیاز)
       if: failure()
       run: |
-        echo "چنانچه فرآیند با خطا مواجه شد، این مرحله اجرا می‌شود"
-        flet build apk --verbose --skip-build-deps
+        cd src
+        echo "تلاش مجدد با گزینه‌های مختلف..."
+        flet build apk --verbose --skip-build-deps || true
 
     - name: ذخیره فایل APK به عنوان خروجی
       uses: actions/upload-artifact@v4
       with:
         name: app-release
-        path: build/apk/
+        path: src/build/apk/
         if-no-files-found: error
