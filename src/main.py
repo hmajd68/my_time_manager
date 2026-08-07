@@ -4,31 +4,63 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta
-import calendar
 import sqlite3
+import random
 
-# ============= دیتابیس SQLite =============
+# ============= دیتابیس =============
 
 class Database:
     def __init__(self):
-        self.conn = sqlite3.connect('tasks.db')
+        self.conn = sqlite3.connect('advanced_tasks.db')
         self.cursor = self.conn.cursor()
         self.create_tables()
     
     def create_tables(self):
+        # جدول کارها
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
                 category TEXT,
                 priority TEXT,
+                eisenhower_type TEXT,
                 done INTEGER DEFAULT 0,
                 deadline TEXT,
                 created TEXT,
                 reminder TEXT,
-                notes TEXT
+                notes TEXT,
+                estimated_time INTEGER DEFAULT 0,
+                actual_time INTEGER DEFAULT 0,
+                energy_level TEXT
             )
         ''')
+        
+        # جدول اهداف
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS goals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                goal_type TEXT,
+                target_date TEXT,
+                progress INTEGER DEFAULT 0,
+                created TEXT
+            )
+        ''')
+        
+        # جدول عادت‌ها
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS habits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                frequency TEXT,
+                streak INTEGER DEFAULT 0,
+                last_done TEXT,
+                created TEXT
+            )
+        ''')
+        
+        # جدول پومودورو
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS pomodoro_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,15 +69,30 @@ class Database:
                 total_time INTEGER DEFAULT 0
             )
         ''')
+        
+        # جدول انرژی
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS daily_energy (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT UNIQUE,
+                energy_level TEXT,
+                mood TEXT,
+                notes TEXT
+            )
+        ''')
+        
+        # جدول گیمیفیکیشن
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS gamification (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 points INTEGER DEFAULT 0,
                 level INTEGER DEFAULT 1,
                 streak INTEGER DEFAULT 0,
-                badges TEXT
+                badges TEXT,
+                total_focus_time INTEGER DEFAULT 0
             )
         ''')
+        
         self.conn.commit()
     
     def execute(self, query, params=()):
@@ -71,18 +118,25 @@ class TaskManager:
                 'title': row[1],
                 'category': row[2],
                 'priority': row[3],
-                'done': bool(row[4]),
-                'deadline': row[5],
-                'created': row[6],
-                'reminder': row[7],
-                'notes': row[8]
+                'eisenhower_type': row[4],
+                'done': bool(row[5]),
+                'deadline': row[6],
+                'created': row[7],
+                'reminder': row[8],
+                'notes': row[9],
+                'estimated_time': row[10],
+                'actual_time': row[11],
+                'energy_level': row[12]
             })
     
-    def add(self, title, category="سایر", priority="متوسط", deadline=None, reminder=None, notes=""):
-        now = datetime.now().strftime("%Y-%m-%d")
+    def add(self, title, category="سایر", priority="متوسط", eisenhower_type="مهم و غیر فوری", 
+            deadline=None, reminder=None, notes="", estimated_time=0, energy_level="متوسط"):
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
         self.db.execute(
-            'INSERT INTO tasks (title, category, priority, deadline, created, reminder, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (title, category, priority, deadline, now, reminder, notes)
+            '''INSERT INTO tasks 
+            (title, category, priority, eisenhower_type, deadline, created, reminder, notes, estimated_time, energy_level) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (title, category, priority, eisenhower_type, deadline, now, reminder, notes, estimated_time, energy_level)
         )
         self.load()
         return self.tasks[-1] if self.tasks else None
@@ -101,144 +155,35 @@ class TaskManager:
             return bool(new_done)
         return False
     
-    def update(self, task_id, **kwargs):
-        for key, value in kwargs.items():
-            self.db.execute(f'UPDATE tasks SET {key} = ? WHERE id = ?', (value, task_id))
-        self.load()
-    
     def get_stats(self):
         total = len(self.tasks)
         done = len([t for t in self.tasks if t['done']])
         categories = {}
         priorities = {}
+        eisenhower = {}
         for task in self.tasks:
             cat = task.get('category', 'سایر')
             categories[cat] = categories.get(cat, 0) + 1
             pri = task.get('priority', 'متوسط')
             priorities[pri] = priorities.get(pri, 0) + 1
+            eis = task.get('eisenhower_type', 'مهم و غیر فوری')
+            eisenhower[eis] = eisenhower.get(eis, 0) + 1
         return {
             'total': total,
             'done': done,
             'pending': total - done,
             'completion_rate': (done / total * 100) if total > 0 else 0,
             'categories': categories,
-            'priorities': priorities
+            'priorities': priorities,
+            'eisenhower': eisenhower
         }
+    
+    def get_tasks_by_eisenhower(self, eisenhower_type):
+        return [t for t in self.tasks if t.get('eisenhower_type') == eisenhower_type and not t['done']]
     
     def get_today_tasks(self):
         today = datetime.now().strftime("%Y-%m-%d")
-        return [t for t in self.tasks if t.get('created') == today and not t['done']]
-    
-    def get_upcoming_deadlines(self):
-        today = datetime.now().date()
-        upcoming = []
-        for task in self.tasks:
-            if task.get('deadline') and not task['done']:
-                try:
-                    deadline_date = datetime.strptime(task['deadline'], "%Y-%m-%d").date()
-                    if 0 <= (deadline_date - today).days <= 7:
-                        upcoming.append(task)
-                except:
-                    pass
-        return upcoming
-
-class PomodoroTimer:
-    def __init__(self, page, db):
-        self.page = page
-        self.db = db
-        self.work_time = 25 * 60
-        self.break_time = 5 * 60
-        self.long_break_time = 15 * 60
-        self.is_running = False
-        self.is_work = True
-        self.remaining = self.work_time
-        self.sessions = 0
-        self.thread = None
-        self.callback = None
-        
-    def start(self, callback=None):
-        if not self.is_running:
-            self.is_running = True
-            self.callback = callback
-            self.thread = threading.Thread(target=self._run, daemon=True)
-            self.thread.start()
-    
-    def stop(self):
-        self.is_running = False
-    
-    def reset(self):
-        self.stop()
-        self.is_work = True
-        self.remaining = self.work_time
-        self.sessions = 0
-    
-    def _run(self):
-        while self.is_running and self.remaining > 0:
-            time.sleep(1)
-            self.remaining -= 1
-            if self.callback:
-                self.callback()
-        
-        if self.remaining == 0 and self.is_running:
-            self.sessions += 1
-            self.save_session()
-            self.switch_mode()
-    
-    def switch_mode(self):
-        self.is_work = not self.is_work
-        if self.is_work:
-            self.remaining = self.work_time
-            message = "⏰ زمان تمرکز!"
-            icon = "🔴"
-        else:
-            if self.sessions % 4 == 0:
-                self.remaining = self.long_break_time
-                message = "☕ استراحت طولانی!"
-            else:
-                self.remaining = self.break_time
-                message = "☕ زمان استراحت!"
-            icon = "🟢"
-        
-        self.page.snack_bar = ft.SnackBar(
-            ft.Text(f"{icon} {message}"),
-            duration=4000,
-            bgcolor=ft.Colors.BLUE_700 if self.is_work else ft.Colors.GREEN_700
-        )
-        self.page.snack_bar.open = True
-        self.page.update()
-        self.start()
-    
-    def save_session(self):
-        today = datetime.now().strftime("%Y-%m-%d")
-        self.db.cursor.execute(
-            'SELECT sessions, total_time FROM pomodoro_sessions WHERE date = ?',
-            (today,)
-        )
-        row = self.db.cursor.fetchone()
-        if row:
-            self.db.execute(
-                'UPDATE pomodoro_sessions SET sessions = ?, total_time = ? WHERE date = ?',
-                (row[0] + 1, row[1] + self.work_time, today)
-            )
-        else:
-            self.db.execute(
-                'INSERT INTO pomodoro_sessions (date, sessions, total_time) VALUES (?, ?, ?)',
-                (today, 1, self.work_time)
-            )
-    
-    def get_time_string(self):
-        minutes = self.remaining // 60
-        seconds = self.remaining % 60
-        return f"{minutes:02d}:{seconds:02d}"
-    
-    def get_today_sessions(self):
-        today = datetime.now().strftime("%Y-%m-%d")
-        self.db.cursor.execute(
-            'SELECT sessions, total_time FROM pomodoro_sessions WHERE date = ?',
-            (today,)
-        )
-        row = self.db.cursor.fetchone()
-        return row if row else (0, 0)
+        return [t for t in self.tasks if t.get('created', '').startswith(today) and not t['done']]
 
 class Gamification:
     def __init__(self, db):
@@ -247,56 +192,47 @@ class Gamification:
         self.level = 1
         self.streak = 0
         self.badges = []
+        self.total_focus_time = 0
         self.load()
     
     def load(self):
-        self.db.cursor.execute('SELECT points, level, streak, badges FROM gamification ORDER BY id DESC LIMIT 1')
+        self.db.cursor.execute('SELECT points, level, streak, badges, total_focus_time FROM gamification ORDER BY id DESC LIMIT 1')
         row = self.db.cursor.fetchone()
         if row:
             self.points = row[0]
             self.level = row[1]
             self.streak = row[2]
             self.badges = json.loads(row[3]) if row[3] else []
+            self.total_focus_time = row[4]
         else:
             self.db.execute(
-                'INSERT INTO gamification (points, level, streak, badges) VALUES (0, 1, 0, "[]")'
+                'INSERT INTO gamification (points, level, streak, badges, total_focus_time) VALUES (0, 1, 0, "[]", 0)'
             )
     
     def save(self):
         self.db.execute(
-            'UPDATE gamification SET points = ?, level = ?, streak = ?, badges = ? WHERE id = 1',
-            (self.points, self.level, self.streak, json.dumps(self.badges))
+            'UPDATE gamification SET points = ?, level = ?, streak = ?, badges = ?, total_focus_time = ? WHERE id = 1',
+            (self.points, self.level, self.streak, json.dumps(self.badges), self.total_focus_time)
         )
     
-    def add_points(self, points, task=None):
+    def add_points(self, points):
         self.points += points
         self.streak += 1
         self.check_level_up()
-        self.check_badges(task)
         self.save()
         return self.get_status()
+    
+    def add_focus_time(self, minutes):
+        self.total_focus_time += minutes
+        self.save()
     
     def check_level_up(self):
         new_level = self.points // 100 + 1
         if new_level > self.level:
             self.level = new_level
-            self.add_badge(f"سطح {self.level} 🏅")
+            self.add_badge(f"سطح {self.level}")
             return True
         return False
-    
-    def check_badges(self, task=None):
-        if self.points >= 50 and "50 امتیاز" not in self.badges:
-            self.add_badge("50 امتیاز ⭐")
-        if self.points >= 100 and "100 امتیاز" not in self.badges:
-            self.add_badge("100 امتیاز ⭐⭐")
-        if self.streak >= 7 and "هفته اول 🎯" not in self.badges:
-            self.add_badge("هفته اول 🎯")
-        if self.streak >= 30 and "ماه اول 🌟" not in self.badges:
-            self.add_badge("ماه اول 🌟")
-        if task and task.get('category') == "کار" and "کارمند نمونه 💼" not in self.badges:
-            self.add_badge("کارمند نمونه 💼")
-        if task and task.get('category') == "مطالعه" and "دانشجو برتر 📚" not in self.badges:
-            self.add_badge("دانشجو برتر 📚")
     
     def add_badge(self, badge):
         if badge not in self.badges:
@@ -308,24 +244,147 @@ class Gamification:
             'points': self.points,
             'level': self.level,
             'streak': self.streak,
-            'badges': self.badges
+            'badges': self.badges,
+            'total_focus_time': self.total_focus_time
         }
 
-# ============= کلاس Calendar =============
-
-class PersianCalendar:
-    @staticmethod
-    def get_persian_date():
-        now = datetime.now()
-        return f"{now.year}-{now.month:02d}-{now.day:02d}"
+class HabitManager:
+    def __init__(self, db):
+        self.db = db
+        self.habits = []
+        self.load()
     
+    def load(self):
+        self.db.cursor.execute('SELECT * FROM habits')
+        rows = self.db.cursor.fetchall()
+        self.habits = []
+        for row in rows:
+            self.habits.append({
+                'id': row[0],
+                'name': row[1],
+                'frequency': row[2],
+                'streak': row[3],
+                'last_done': row[4],
+                'created': row[5]
+            })
+    
+    def add(self, name, frequency="روزانه"):
+        now = datetime.now().strftime("%Y-%m-%d")
+        self.db.execute(
+            'INSERT INTO habits (name, frequency, created) VALUES (?, ?, ?)',
+            (name, frequency, now)
+        )
+        self.load()
+        return self.habits[-1] if self.habits else None
+    
+    def mark_done(self, habit_id):
+        today = datetime.now().strftime("%Y-%m-%d")
+        self.db.cursor.execute('SELECT last_done, streak FROM habits WHERE id = ?', (habit_id,))
+        row = self.db.cursor.fetchone()
+        if row:
+            last_done = row[0]
+            streak = row[1]
+            if last_done != today:
+                if last_done and (datetime.now() - datetime.strptime(last_done, "%Y-%m-%d")).days == 1:
+                    streak += 1
+                else:
+                    streak = 1
+                self.db.execute(
+                    'UPDATE habits SET last_done = ?, streak = ? WHERE id = ?',
+                    (today, streak, habit_id)
+                )
+        self.load()
+
+class SimpleAI:
     @staticmethod
-    def get_persian_month_name(month):
-        months = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
-                  'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند']
-        return months[month - 1] if 1 <= month <= 12 else ""
+    def suggest_daily_plan(tasks, energy_level="متوسط"):
+        if not tasks:
+            return "امروز هیچ کاری ندارید! استراحت کنید."
+        
+        high_priority = [t for t in tasks if t.get('priority') == "بالا"]
+        
+        if energy_level == "زیاد":
+            suggestion = "✨ انرژی بالا! زمان کارهای سخت:\n"
+            if high_priority:
+                suggestion += "🔴 کارهای مهم امروز:\n"
+                for t in high_priority[:3]:
+                    suggestion += f"  • {t['title']}\n"
+            return suggestion
+        elif energy_level == "کم":
+            return "😴 انرژی کم است. کارهای سبک انجام دهید."
+        else:
+            suggestion = "⚡ انرژی متوسط. تعادل را رعایت کنید.\n"
+            if high_priority:
+                suggestion += f"🎯 کارهای مهم:\n"
+                for t in high_priority[:2]:
+                    suggestion += f"  • {t['title']}\n"
+            return suggestion
 
 # ============= صفحه‌های برنامه =============
+
+class DashboardPage:
+    def __init__(self, page, task_manager, gamification):
+        self.page = page
+        self.task_manager = task_manager
+        self.gamification = gamification
+        self.build()
+    
+    def build(self):
+        stats = self.task_manager.get_stats()
+        g_status = self.gamification.get_status()
+        
+        cards = ft.Row([
+            ft.Card(ft.Container(ft.Column([
+                ft.Text(f"📋 {stats['total']}", size=24),
+                ft.Text("مجموع", size=12)
+            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER), padding=10, width=80)),
+            ft.Card(ft.Container(ft.Column([
+                ft.Text(f"✅ {stats['done']}", size=24, color=ft.Colors.GREEN_700),
+                ft.Text("انجام شده", size=12)
+            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER), padding=10, width=80)),
+            ft.Card(ft.Container(ft.Column([
+                ft.Text(f"⏳ {stats['pending']}", size=24, color=ft.Colors.RED_700),
+                ft.Text("باقی مانده", size=12)
+            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER), padding=10, width=80)),
+        ], alignment=ft.MainAxisAlignment.CENTER)
+        
+        progress = ft.Column([
+            ft.Text(f"📈 پیشرفت: {stats['completion_rate']:.1f}%"),
+            ft.ProgressBar(value=stats['completion_rate']/100, height=10, color=ft.Colors.BLUE_700)
+        ], spacing=5)
+        
+        gamification_card = ft.Card(
+            ft.Container(
+                ft.Column([
+                    ft.Text(f"⭐ {g_status['points']} امتیاز", size=18),
+                    ft.Text(f"🏅 سطح {g_status['level']}"),
+                    ft.Text(f"🔥 {g_status['streak']} روز"),
+                    ft.Row([ft.Text(badge, size=12) for badge in g_status['badges']])
+                ]),
+                padding=15
+            )
+        )
+        
+        ai_suggestion = ft.Card(
+            ft.Container(
+                ft.Column([
+                    ft.Text("🤖 پیشنهاد AI", size=18, weight=ft.FontWeight.BOLD),
+                    ft.Text(SimpleAI.suggest_daily_plan(
+                        self.task_manager.get_today_tasks(), 
+                        "متوسط"
+                    ), size=14)
+                ]),
+                padding=15
+            )
+        )
+        
+        self.page.add(
+            ft.Text("📊 داشبورد", size=24, weight=ft.FontWeight.BOLD),
+            cards,
+            progress,
+            gamification_card,
+            ai_suggestion
+        )
 
 class TaskPage:
     def __init__(self, page, task_manager, gamification, db):
@@ -334,71 +393,21 @@ class TaskPage:
         self.gamification = gamification
         self.db = db
         self.task_list = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
-        self.search_input = ft.TextField(
-            hint_text="جستجوی کارها...",
-            width=200,
-            on_change=self.filter_tasks,
-            prefix_icon="SEARCH"  # ✅ اصلاح شده
-        )
-        self.filter_dropdown = ft.Dropdown(
-            options=[
-                ft.dropdown.Option("همه", "all"),
-                ft.dropdown.Option("انجام نشده", "pending"),
-                ft.dropdown.Option("انجام شده", "done"),
-            ],
-            value="all",
-            width=120,
-            on_change=self.filter_tasks
-        )
-        self.tasks = []
         self.build()
     
     def build(self):
-        top_row = ft.Row([
-            ft.Text("📋 کارها", size=24, weight=ft.FontWeight.BOLD),
-            ft.Row([
-                self.search_input,
-                self.filter_dropdown,
-            ])
-        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
-        
         add_button = ft.FloatingActionButton(
-            icon="ADD",  # ✅ اصلاح شده
+            icon="ADD",
             bgcolor=ft.Colors.BLUE_700,
             on_click=lambda _: self.show_add_task_dialog()
         )
         
-        quick_filters = ft.Row([
-            ft.Chip(
-                label=ft.Text("همه"),
-                on_click=lambda _: self.apply_filter("all"),
-                selected_color=ft.Colors.BLUE_700
-            ),
-            ft.Chip(
-                label=ft.Text("امروز"),
-                on_click=lambda _: self.apply_filter("today"),
-            ),
-            ft.Chip(
-                label=ft.Text("این هفته"),
-                on_click=lambda _: self.apply_filter("week"),
-            ),
-            ft.Chip(
-                label=ft.Text("بالا اولویت"),
-                on_click=lambda _: self.apply_filter("high"),
-            ),
-        ], spacing=5)
-        
-        self.content = ft.Column([
-            top_row,
-            quick_filters,
-            ft.Divider(height=10),
-            self.task_list,
-        ], expand=True)
-        
         self.page.add(
-            self.content,
+            ft.Text("📋 کارها", size=24, weight=ft.FontWeight.BOLD),
+            self.task_list,
             add_button
         )
+        self.update_task_list()
     
     def show_add_task_dialog(self):
         title_input = ft.TextField(hint_text="عنوان کار", rtl=True)
@@ -421,6 +430,16 @@ class TaskPage:
             value="متوسط",
             rtl=True
         )
+        eisenhower_dropdown = ft.Dropdown(
+            options=[
+                ft.dropdown.Option("مهم و فوری", "مهم و فوری"),
+                ft.dropdown.Option("مهم و غیر فوری", "مهم و غیر فوری"),
+                ft.dropdown.Option("غیر مهم و فوری", "غیر مهم و فوری"),
+                ft.dropdown.Option("حذف‌شدنی", "حذف‌شدنی"),
+            ],
+            value="مهم و غیر فوری",
+            rtl=True
+        )
         deadline_input = ft.TextField(hint_text="تاریخ سررسید (اختیاری)", rtl=True)
         notes_input = ft.TextField(hint_text="یادداشت (اختیاری)", multiline=True, rtl=True)
         
@@ -429,6 +448,7 @@ class TaskPage:
             content=ft.Column([
                 title_input,
                 ft.Row([category_dropdown, priority_dropdown]),
+                eisenhower_dropdown,
                 deadline_input,
                 notes_input,
             ], tight=True),
@@ -438,6 +458,7 @@ class TaskPage:
                     title_input.value,
                     category_dropdown.value,
                     priority_dropdown.value,
+                    eisenhower_dropdown.value,
                     deadline_input.value,
                     notes_input.value
                 )),
@@ -447,16 +468,15 @@ class TaskPage:
         dialog.open = True
         self.page.update()
     
-    def add_task(self, title, category, priority, deadline, notes):
+    def add_task(self, title, category, priority, eisenhower, deadline, notes):
         if title and title.strip():
-            task = self.task_manager.add(title.strip(), category, priority, deadline, None, notes)
-            self.gamification.add_points(5, task)
+            task = self.task_manager.add(
+                title.strip(), category, priority, eisenhower, deadline, None, notes
+            )
+            self.gamification.add_points(5)
             self.close_dialog()
             self.update_task_list()
-            self.page.snack_bar = ft.SnackBar(
-                ft.Text("✅ کار جدید اضافه شد!"),
-                bgcolor=ft.Colors.GREEN_700
-            )
+            self.page.snack_bar = ft.SnackBar(ft.Text("✅ کار اضافه شد! +۵ امتیاز"))
             self.page.snack_bar.open = True
             self.page.update()
     
@@ -468,70 +488,41 @@ class TaskPage:
     def update_task_list(self):
         self.task_list.controls.clear()
         
+        priority_colors = {
+            "بالا": ft.Colors.RED_700,
+            "متوسط": ft.Colors.ORANGE_700,
+            "پایین": ft.Colors.GREEN_700
+        }
+        
         for task in self.task_manager.tasks:
             if task['done']:
                 continue
             
-            priority_colors = {
-                "بالا": ft.Colors.RED_700,
-                "متوسط": ft.Colors.ORANGE_700,
-                "پایین": ft.Colors.GREEN_700
-            }
-            
             task_card = ft.Card(
-                content=ft.Container(
-                    content=ft.Row([
+                ft.Container(
+                    ft.Row([
                         ft.Checkbox(
                             value=task['done'],
-                            on_change=lambda e, t=task: self.toggle_task(t['id']),
-                            fill_color=ft.Colors.GREEN_700 if task['done'] else None
+                            on_change=lambda e, t=task: self.toggle_task(t['id'])
                         ),
                         ft.Column([
-                            ft.Text(
-                                task['title'],
-                                size=16,
-                                weight=ft.FontWeight.BOLD if not task['done'] else ft.FontWeight.NORMAL,
-                                color=ft.Colors.GREY_600 if task['done'] else ft.Colors.BLACK,
-                                rtl=True
-                            ),
+                            ft.Text(task['title'], size=16, rtl=True),
                             ft.Row([
-                                ft.Icon(
-                                    name=self.get_category_icon(task.get('category', 'سایر')),
-                                    size=16,
-                                    color=priority_colors.get(task.get('priority', 'متوسط'), ft.Colors.GREY)
-                                ),
-                                ft.Text(
-                                    task.get('category', 'سایر'),
-                                    size=12,
-                                    color=ft.Colors.GREY_600,
-                                    rtl=True
-                                ),
+                                ft.Text(task.get('category', ''), size=12),
                                 ft.Container(
-                                    content=ft.Text(
-                                        task.get('priority', 'متوسط'),
-                                        size=10,
-                                        color=ft.Colors.WHITE,
-                                        rtl=True
-                                    ),
+                                    ft.Text(task.get('priority', ''), size=10, color=ft.Colors.WHITE),
                                     bgcolor=priority_colors.get(task.get('priority', 'متوسط'), ft.Colors.GREY),
                                     padding=5,
                                     border_radius=5
                                 ),
-                                ft.Text(
-                                    task.get('created', ''),
-                                    size=10,
-                                    color=ft.Colors.GREY_500
-                                )
+                                ft.Text(task.get('eisenhower_type', ''), size=10)
                             ])
-                        ], spacing=2, expand=True),
-                        ft.Row([
-                            ft.IconButton(
-                                icon="DELETE_OUTLINE",  # ✅ اصلاح شده
-                                icon_color=ft.Colors.RED_400,
-                                icon_size=20,
-                                on_click=lambda e, t=task: self.delete_task(t['id']),
-                            )
-                        ], spacing=0)
+                        ], expand=True),
+                        ft.IconButton(
+                            icon="DELETE",
+                            icon_color=ft.Colors.RED_400,
+                            on_click=lambda e, t=task: self.delete_task(t['id'])
+                        )
                     ]),
                     padding=10
                 )
@@ -540,7 +531,7 @@ class TaskPage:
         
         if not self.task_list.controls:
             self.task_list.controls.append(
-                ft.Text("🎯 همه کارها انجام شد!", size=16, color=ft.Colors.GREY_500, rtl=True)
+                ft.Text("🎯 همه کارها انجام شد!", size=16, color=ft.Colors.GREY_500)
             )
         
         self.page.update()
@@ -549,10 +540,7 @@ class TaskPage:
         done = self.task_manager.toggle(task_id)
         if done:
             self.gamification.add_points(10)
-            self.page.snack_bar = ft.SnackBar(
-                ft.Text("🎉 +۱۰ امتیاز! تبریک!"),
-                bgcolor=ft.Colors.GREEN_700
-            )
+            self.page.snack_bar = ft.SnackBar(ft.Text("🎉 +۱۰ امتیاز!"))
             self.page.snack_bar.open = True
         self.update_task_list()
         self.page.update()
@@ -561,247 +549,437 @@ class TaskPage:
         self.task_manager.delete(task_id)
         self.update_task_list()
         self.page.update()
-    
-    def filter_tasks(self, e):
-        query = self.search_input.value.lower() if self.search_input.value else ""
-        filter_type = self.filter_dropdown.value
-        
-        self.task_list.controls.clear()
-        filtered_tasks = self.task_manager.tasks
-        
-        if query:
-            filtered_tasks = [t for t in filtered_tasks if query in t['title'].lower()]
-        
-        if filter_type == "pending":
-            filtered_tasks = [t for t in filtered_tasks if not t['done']]
-        elif filter_type == "done":
-            filtered_tasks = [t for t in filtered_tasks if t['done']]
-        
-        for task in filtered_tasks:
-            pass
-        self.update_task_list()
-    
-    def apply_filter(self, filter_type):
-        pass
-    
-    def get_category_icon(self, category):
-        icons = {
-            "کار": "WORK",  # ✅ اصلاح شده
-            "شخصی": "PERSON",  # ✅ اصلاح شده
-            "مطالعه": "SCHOOL",  # ✅ اصلاح شده
-            "سلامت": "FAVORITE",  # ✅ اصلاح شده
-            "سایر": "ADD_TASK"  # ✅ اصلاح شده
-        }
-        return icons.get(category, "ADD_TASK")
 
-class DashboardPage:
-    def __init__(self, page, task_manager, gamification, timer, db):
+class EisenhowerMatrixPage:
+    def __init__(self, page, task_manager):
         self.page = page
         self.task_manager = task_manager
-        self.gamification = gamification
-        self.timer = timer
-        self.db = db
         self.build()
     
     def build(self):
-        stats = self.task_manager.get_stats()
-        g_status = self.gamification.get_status()
+        types = [
+            ("🔴 مهم و فوری", "مهم و فوری"),
+            ("🟡 مهم و غیر فوری", "مهم و غیر فوری"),
+            ("🟠 غیر مهم و فوری", "غیر مهم و فوری"),
+            ("⚪ حذف‌شدنی", "حذف‌شدنی")
+        ]
         
-        stat_cards = ft.Row([
-            ft.Card(
-                content=ft.Container(
-                    content=ft.Column([
-                        ft.Text("📋 مجموع", size=12, color=ft.Colors.GREY_600),
-                        ft.Text(str(stats['total']), size=24, weight=ft.FontWeight.BOLD),
-                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                    padding=10,
-                    width=100
-                )
+        matrix = ft.Column()
+        row1 = ft.Row()
+        row2 = ft.Row()
+        
+        for i, (label, eisenhower_type) in enumerate(types):
+            tasks = self.task_manager.get_tasks_by_eisenhower(eisenhower_type)
+            card = self.create_matrix_card(label, eisenhower_type, tasks)
+            if i < 2:
+                row1.controls.append(card)
+            else:
+                row2.controls.append(card)
+        
+        matrix.controls.append(row1)
+        matrix.controls.append(row2)
+        
+        self.page.add(
+            ft.Text("📊 ماتریس آیزنهاور", size=24, weight=ft.FontWeight.BOLD),
+            matrix
+        )
+    
+    def create_matrix_card(self, title, eisenhower_type, tasks):
+        return ft.Card(
+            ft.Container(
+                ft.Column([
+                    ft.Text(title, size=16, weight=ft.FontWeight.BOLD),
+                    ft.Text(f"تعداد: {len(tasks)}", size=12),
+                    ft.Column([
+                        ft.Text(f"• {t['title']}", size=12, rtl=True) for t in tasks[:3]
+                    ]) if tasks else ft.Text("✅ خالی!", size=12, color=ft.Colors.GREY_500)
+                ]),
+                padding=10,
+                width=180,
+                height=150,
+                bgcolor=self.get_color(eisenhower_type)
+            )
+        )
+    
+    def get_color(self, eisenhower_type):
+        colors = {
+            "مهم و فوری": ft.Colors.RED_100,
+            "مهم و غیر فوری": ft.Colors.YELLOW_100,
+            "غیر مهم و فوری": ft.Colors.ORANGE_100,
+            "حذف‌شدنی": ft.Colors.GREY_200
+        }
+        return colors.get(eisenhower_type, ft.Colors.WHITE)
+
+class PomodoroPage:
+    def __init__(self, page, db, gamification):
+        self.page = page
+        self.db = db
+        self.gamification = gamification
+        self.work_time = 25 * 60
+        self.break_time = 5 * 60
+        self.is_running = False
+        self.is_work = True
+        self.remaining = self.work_time
+        self.sessions = 0
+        self.thread = None
+        self.build()
+    
+    def build(self):
+        self.display = ft.Text("25:00", size=48, weight=ft.FontWeight.BOLD)
+        
+        controls = ft.Row([
+            ft.IconButton(
+                icon="PLAY_CIRCLE",
+                icon_size=40,
+                on_click=self.start,
+                icon_color=ft.Colors.GREEN_700
             ),
-            ft.Card(
-                content=ft.Container(
-                    content=ft.Column([
-                        ft.Text("✅ انجام شده", size=12, color=ft.Colors.GREY_600),
-                        ft.Text(str(stats['done']), size=24, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_700),
-                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                    padding=10,
-                    width=100
-                )
+            ft.IconButton(
+                icon="STOP_CIRCLE",
+                icon_size=40,
+                on_click=self.stop,
+                icon_color=ft.Colors.RED_700
             ),
-            ft.Card(
-                content=ft.Container(
-                    content=ft.Column([
-                        ft.Text("⏳ باقی مانده", size=12, color=ft.Colors.GREY_600),
-                        ft.Text(str(stats['pending']), size=24, weight=ft.FontWeight.BOLD, color=ft.Colors.RED_700),
-                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                    padding=10,
-                    width=100
-                )
+            ft.IconButton(
+                icon="REFRESH",
+                icon_size=40,
+                on_click=self.reset,
+                icon_color=ft.Colors.ORANGE_700
             ),
         ], alignment=ft.MainAxisAlignment.CENTER)
         
-        progress = ft.Column([
-            ft.Text(f"📈 پیشرفت: {stats['completion_rate']:.1f}%", rtl=True),
-            ft.ProgressBar(
-                value=stats['completion_rate']/100,
-                height=10,
-                color=ft.Colors.BLUE_700,
-                bgcolor=ft.Colors.GREY_300
-            )
-        ], spacing=5)
-        
-        gamification_card = ft.Card(
-            content=ft.Container(
-                content=ft.Column([
-                    ft.Text("🎮 گیمیفیکیشن", size=18, weight=ft.FontWeight.BOLD, rtl=True),
-                    ft.Row([
-                        ft.Text(f"⭐ امتیاز: {g_status['points']}"),
-                        ft.Text(f"🏅 سطح: {g_status['level']}"),
-                        ft.Text(f"🔥 رکورد: {g_status['streak']} روز"),
-                    ]),
-                    ft.Row([
-                        ft.Text("🎖️ نشان‌ها: "),
-                        ft.Row([ft.Text(badge, size=12, rtl=True) for badge in g_status['badges']])
-                    ])
-                ]),
-                padding=15
-            )
-        )
-        
-        timer_card = ft.Card(
-            content=ft.Container(
-                content=ft.Column([
-                    ft.Text("⏱️ تایمر پومودورو", size=18, weight=ft.FontWeight.BOLD, rtl=True),
-                    ft.Text(self.timer.get_time_string(), size=36, weight=ft.FontWeight.BOLD),
-                    ft.Row([
-                        ft.IconButton(
-                            icon="PLAY_ARROW",  # ✅ اصلاح شده
-                            on_click=lambda _: self.timer.start(lambda: self.update_timer_display()),
-                            icon_color=ft.Colors.GREEN_700
-                        ),
-                        ft.IconButton(
-                            icon="STOP",  # ✅ اصلاح شده
-                            on_click=lambda _: self.timer.stop(),
-                            icon_color=ft.Colors.RED_700
-                        ),
-                        ft.IconButton(
-                            icon="REFRESH",  # ✅ اصلاح شده
-                            on_click=lambda _: self.timer.reset(),
-                            icon_color=ft.Colors.ORANGE_700
-                        ),
-                    ]),
-                    ft.Text(f"جلسات امروز: {self.timer.get_today_sessions()[0]}", rtl=True)
-                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                padding=15
-            )
-        )
-        
-        today_tasks = self.task_manager.get_today_tasks()
-        today_card = ft.Card(
-            content=ft.Container(
-                content=ft.Column([
-                    ft.Text(f"📌 کارهای امروز ({len(today_tasks)})", size=18, weight=ft.FontWeight.BOLD, rtl=True),
-                    ft.Column([
-                        ft.Text(f"• {task['title']}", rtl=True) for task in today_tasks[:5]
-                    ]) if today_tasks else ft.Text("🎉 امروز هیچ کاری نداری!", rtl=True, color=ft.Colors.GREY_500)
-                ]),
-                padding=15
-            )
-        )
-        
-        upcoming = self.task_manager.get_upcoming_deadlines()
-        upcoming_card = ft.Card(
-            content=ft.Container(
-                content=ft.Column([
-                    ft.Text(f"⏰ سررسیدهای نزدیک ({len(upcoming)})", size=18, weight=ft.FontWeight.BOLD, rtl=True),
-                    ft.Column([
-                        ft.Text(f"• {task['title']} ({task.get('deadline', '')})", rtl=True) for task in upcoming[:5]
-                    ]) if upcoming else ft.Text("✅ هیچ سررسید نزدیکی نداری!", rtl=True, color=ft.Colors.GREY_500)
-                ]),
-                padding=15
-            )
-        )
+        info = ft.Text("⏱️ ۲۵ دقیقه کار | ۵ دقیقه استراحت", size=14)
+        stats = ft.Text(f"📊 جلسات امروز: {self.get_today_sessions()}", size=14)
         
         self.page.add(
-            ft.Text("📊 داشبورد", size=24, weight=ft.FontWeight.BOLD),
-            stat_cards,
-            progress,
-            gamification_card,
-            timer_card,
-            today_card,
-            upcoming_card,
+            ft.Text("🍅 پومودورو", size=24, weight=ft.FontWeight.BOLD),
+            self.display,
+            controls,
+            info,
+            stats
         )
     
-    def update_timer_display(self):
-        pass
+    def start(self, e):
+        if not self.is_running:
+            self.is_running = True
+            self.thread = threading.Thread(target=self._run, daemon=True)
+            self.thread.start()
+    
+    def stop(self, e):
+        self.is_running = False
+    
+    def reset(self, e):
+        self.stop()
+        self.is_work = True
+        self.remaining = self.work_time
+        self.update_display()
+    
+    def _run(self):
+        while self.is_running and self.remaining > 0:
+            time.sleep(1)
+            self.remaining -= 1
+            self.update_display()
+        
+        if self.remaining == 0 and self.is_running:
+            self.sessions += 1
+            self.save_session()
+            self.gamification.add_points(10)
+            self.switch_mode()
+    
+    def switch_mode(self):
+        self.is_work = not self.is_work
+        self.remaining = self.work_time if self.is_work else self.break_time
+        message = "🔴 زمان تمرکز!" if self.is_work else "🟢 زمان استراحت!"
+        self.page.snack_bar = ft.SnackBar(ft.Text(message), duration=3000)
+        self.page.snack_bar.open = True
+        self.page.update()
+        self.start(None)
+    
+    def update_display(self):
+        minutes = self.remaining // 60
+        seconds = self.remaining % 60
+        self.display.value = f"{minutes:02d}:{seconds:02d}"
+        self.display.update()
+    
+    def save_session(self):
+        today = datetime.now().strftime("%Y-%m-%d")
+        self.db.cursor.execute(
+            'SELECT sessions FROM pomodoro_sessions WHERE date = ?',
+            (today,)
+        )
+        row = self.db.cursor.fetchone()
+        if row:
+            self.db.execute(
+                'UPDATE pomodoro_sessions SET sessions = ? WHERE date = ?',
+                (row[0] + 1, today)
+            )
+        else:
+            self.db.execute(
+                'INSERT INTO pomodoro_sessions (date, sessions) VALUES (?, ?)',
+                (today, 1)
+            )
+    
+    def get_today_sessions(self):
+        today = datetime.now().strftime("%Y-%m-%d")
+        self.db.cursor.execute(
+            'SELECT sessions FROM pomodoro_sessions WHERE date = ?',
+            (today,)
+        )
+        row = self.db.cursor.fetchone()
+        return row[0] if row else 0
 
-class CalendarPage:
-    def __init__(self, page, task_manager, db):
+class HabitTrackerPage:
+    def __init__(self, page, habit_manager, gamification):
         self.page = page
-        self.task_manager = task_manager
-        self.db = db
-        self.selected_date = datetime.now().strftime("%Y-%m-%d")
+        self.habit_manager = habit_manager
+        self.gamification = gamification
         self.build()
     
     def build(self):
-        today = datetime.now()
-        persian_date = PersianCalendar.get_persian_date()
-        persian_month = PersianCalendar.get_persian_month_name(today.month)
+        habits_list = ft.Column()
+        
+        for habit in self.habit_manager.habits:
+            habit_row = ft.Row([
+                ft.Text(f"• {habit['name']}", size=16, rtl=True),
+                ft.Text(f"🔥 {habit['streak']} روز", size=12, color=ft.Colors.ORANGE_700),
+                ft.IconButton(
+                    icon="CHECK_CIRCLE",
+                    icon_color=ft.Colors.GREEN_700,
+                    on_click=lambda e, h=habit: self.mark_habit_done(h['id'])
+                )
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+            habits_list.controls.append(habit_row)
+        
+        add_button = ft.ElevatedButton(
+            "➕ عادت جدید",
+            on_click=lambda _: self.show_add_habit_dialog()
+        )
         
         self.page.add(
-            ft.Text("📅 تقویم", size=24, weight=ft.FontWeight.BOLD),
-            ft.Card(
-                content=ft.Container(
-                    content=ft.Column([
-                        ft.Text(f"تاریخ امروز: {persian_date}", size=18, rtl=True),
-                        ft.Text(f"{today.year} {persian_month} {today.day}", size=16, rtl=True),
-                        ft.Divider(height=10),
-                        ft.Text("📌 کارهای امروز", size=16, weight=ft.FontWeight.BOLD, rtl=True),
-                        self.tasks_container()
-                    ]),
-                    padding=15
-                )
-            )
+            ft.Text("🔄 مدیریت عادت‌ها", size=24, weight=ft.FontWeight.BOLD),
+            habits_list,
+            add_button
         )
     
-    def tasks_container(self):
-        today = datetime.now().strftime("%Y-%m-%d")
-        tasks = [t for t in self.task_manager.tasks if t.get('created') == today]
+    def mark_habit_done(self, habit_id):
+        self.habit_manager.mark_done(habit_id)
+        self.gamification.add_points(5)
+        self.page.snack_bar = ft.SnackBar(ft.Text("✅ عادت ثبت شد! +۵ امتیاز"))
+        self.page.snack_bar.open = True
+        self.page.update()
+    
+    def show_add_habit_dialog(self):
+        name_input = ft.TextField(hint_text="نام عادت", rtl=True)
+        frequency_dropdown = ft.Dropdown(
+            options=[
+                ft.dropdown.Option("روزانه", "روزانه"),
+                ft.dropdown.Option("هفتگی", "هفتگی"),
+            ],
+            value="روزانه",
+            rtl=True
+        )
         
-        return ft.Column([
-            ft.Column([
-                ft.Text(f"• {task['title']}", rtl=True) for task in tasks
-            ]) if tasks else ft.Text("📭 هیچ کاری در این تاریخ نیست!", rtl=True, color=ft.Colors.GREY_500)
-        ])
+        dialog = ft.AlertDialog(
+            title=ft.Text("عادت جدید", rtl=True),
+            content=ft.Column([name_input, frequency_dropdown]),
+            actions=[
+                ft.TextButton("لغو", on_click=lambda _: self.close_dialog()),
+                ft.TextButton("افزودن", on_click=lambda _: self.add_habit(name_input.value, frequency_dropdown.value)),
+            ]
+        )
+        self.page.dialog = dialog
+        dialog.open = True
+        self.page.update()
+    
+    def add_habit(self, name, frequency):
+        if name and name.strip():
+            self.habit_manager.add(name.strip(), frequency)
+            self.close_dialog()
+            self.gamification.add_points(10)
+            self.page.snack_bar = ft.SnackBar(ft.Text("✅ عادت جدید اضافه شد! +۱۰ امتیاز"))
+            self.page.snack_bar.open = True
+            self.page.update()
+            self.build()
+    
+    def close_dialog(self):
+        if self.page.dialog:
+            self.page.dialog.open = False
+            self.page.update()
 
-class SettingsPage:
+class FocusModePage:
+    def __init__(self, page, db, gamification):
+        self.page = page
+        self.db = db
+        self.gamification = gamification
+        self.is_focus = False
+        self.focus_time = 0
+        self.timer = None
+        self.build()
+    
+    def build(self):
+        self.display = ft.Text("00:00:00", size=48, weight=ft.FontWeight.BOLD)
+        
+        controls = ft.Row([
+            ft.IconButton(
+                icon="PLAY_CIRCLE",
+                icon_size=40,
+                on_click=self.start_focus,
+                icon_color=ft.Colors.GREEN_700
+            ),
+            ft.IconButton(
+                icon="STOP_CIRCLE",
+                icon_size=40,
+                on_click=self.stop_focus,
+                icon_color=ft.Colors.RED_700
+            ),
+        ], alignment=ft.MainAxisAlignment.CENTER)
+        
+        info = ft.Text("⏱️ زمان تمرکز ثبت می‌شود", size=14, color=ft.Colors.GREY_600)
+        
+        self.page.add(
+            ft.Text("🎯 حالت تمرکز", size=24, weight=ft.FontWeight.BOLD),
+            self.display,
+            controls,
+            info,
+            ft.Text(f"📊 زمان کل تمرکز: {self.gamification.total_focus_time} دقیقه", size=14)
+        )
+    
+    def start_focus(self, e):
+        if not self.is_focus:
+            self.is_focus = True
+            self.focus_time = 0
+            self.timer = threading.Thread(target=self._run_focus, daemon=True)
+            self.timer.start()
+            self.page.snack_bar = ft.SnackBar(ft.Text("🔴 حالت تمرکز فعال شد!"))
+            self.page.snack_bar.open = True
+            self.page.update()
+    
+    def stop_focus(self, e):
+        if self.is_focus:
+            self.is_focus = False
+            minutes = self.focus_time // 60
+            self.gamification.add_focus_time(minutes)
+            self.gamification.add_points(minutes // 5)
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"✅ {minutes} دقیقه تمرکز! +{minutes//5} امتیاز"))
+            self.page.snack_bar.open = True
+            self.page.update()
+    
+    def _run_focus(self):
+        while self.is_focus:
+            time.sleep(1)
+            self.focus_time += 1
+            minutes = self.focus_time // 60
+            seconds = self.focus_time % 60
+            self.display.value = f"{minutes:02d}:{seconds:02d}"
+            self.display.update()
+
+class DailyEnergyPage:
     def __init__(self, page, db):
         self.page = page
         self.db = db
         self.build()
     
     def build(self):
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        self.db.cursor.execute('SELECT energy_level FROM daily_energy WHERE date = ?', (today,))
+        row = self.db.cursor.fetchone()
+        current_energy = row[0] if row else "ثبت نشده"
+        
+        self.page.add(
+            ft.Text("⚡ ثبت انرژی روزانه", size=24, weight=ft.FontWeight.BOLD),
+            ft.Text(f"📅 امروز: {today}", size=16),
+            ft.Text(f"🔋 انرژی فعلی: {current_energy}", size=16),
+            ft.Row([
+                ft.ElevatedButton("⚡ زیاد", on_click=lambda _: self.set_energy("زیاد")),
+                ft.ElevatedButton("⚡ متوسط", on_click=lambda _: self.set_energy("متوسط")),
+                ft.ElevatedButton("⚡ کم", on_click=lambda _: self.set_energy("کم")),
+            ])
+        )
+    
+    def set_energy(self, level):
+        today = datetime.now().strftime("%Y-%m-%d")
+        self.db.execute(
+            'INSERT OR REPLACE INTO daily_energy (date, energy_level) VALUES (?, ?)',
+            (today, level)
+        )
+        self.page.snack_bar = ft.SnackBar(ft.Text(f"✅ انرژی امروز: {level} ثبت شد!"))
+        self.page.snack_bar.open = True
+        self.page.update()
+        self.build()
+
+class ReportPage:
+    def __init__(self, page, task_manager, gamification):
+        self.page = page
+        self.task_manager = task_manager
+        self.gamification = gamification
+        self.build()
+    
+    def build(self):
+        stats = self.task_manager.get_stats()
+        g_status = self.gamification.get_status()
+        
+        self.page.add(
+            ft.Text("📊 گزارش عملکرد", size=24, weight=ft.FontWeight.BOLD),
+            ft.Card(
+                ft.Container(
+                    ft.Column([
+                        ft.Text("📋 آمار کلی", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Text(f"تعداد کل کارها: {stats['total']}"),
+                        ft.Text(f"انجام شده: {stats['done']}"),
+                        ft.Text(f"باقی مانده: {stats['pending']}"),
+                        ft.Text(f"نرخ موفقیت: {stats['completion_rate']:.1f}%"),
+                        ft.Text(f"دسته‌بندی‌ها: {', '.join(stats['categories'].keys())}"),
+                        ft.Text(f"اولویت‌ها: {', '.join(stats['priorities'].keys())}"),
+                    ]),
+                    padding=15
+                )
+            ),
+            ft.Card(
+                ft.Container(
+                    ft.Column([
+                        ft.Text("🏆 آمار گیمیفیکیشن", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Text(f"امتیاز: {g_status['points']}"),
+                        ft.Text(f"سطح: {g_status['level']}"),
+                        ft.Text(f"رکورد: {g_status['streak']} روز"),
+                        ft.Text(f"زمان تمرکز: {g_status['total_focus_time']} دقیقه"),
+                        ft.Text(f"نشان‌ها: {', '.join(g_status['badges']) if g_status['badges'] else 'هیچ'}")
+                    ]),
+                    padding=15
+                )
+            )
+        )
+
+class SettingsPage:
+    def __init__(self, page, db, gamification):
+        self.page = page
+        self.db = db
+        self.gamification = gamification
+        self.build()
+    
+    def build(self):
         theme_toggle = ft.Switch(
             value=self.page.theme_mode == ft.ThemeMode.DARK,
             on_change=self.toggle_theme,
-            label="حالت شب"
+            label="🌙 حالت شب"
         )
         
         backup_button = ft.ElevatedButton(
-            "📥 پشتیبان‌گیری",
+            "💾 پشتیبان‌گیری",
             on_click=self.backup_data
         )
         
-        restore_button = ft.ElevatedButton(
-            "📤 بازیابی",
-            on_click=self.restore_data
+        reset_button = ft.ElevatedButton(
+            "🔄 ریست کردن",
+            on_click=self.reset_data,
+            color=ft.Colors.RED_700
         )
         
         self.page.add(
             ft.Text("⚙️ تنظیمات", size=24, weight=ft.FontWeight.BOLD),
             ft.Card(
-                content=ft.Container(
-                    content=ft.Column([
+                ft.Container(
+                    ft.Column([
                         ft.Text("ظاهر", size=18, weight=ft.FontWeight.BOLD),
                         theme_toggle,
                     ]),
@@ -809,21 +987,20 @@ class SettingsPage:
                 )
             ),
             ft.Card(
-                content=ft.Container(
-                    content=ft.Column([
+                ft.Container(
+                    ft.Column([
                         ft.Text("داده‌ها", size=18, weight=ft.FontWeight.BOLD),
-                        ft.Row([backup_button, restore_button]),
+                        ft.Row([backup_button, reset_button]),
                     ]),
                     padding=15
                 )
             ),
             ft.Card(
-                content=ft.Container(
-                    content=ft.Column([
-                        ft.Text("📊 آمار پیشرفته", size=18, weight=ft.FontWeight.BOLD, rtl=True),
-                        ft.Text("تعداد کل کارها: ...", rtl=True),
-                        ft.Text("میانگین کارهای روزانه: ...", rtl=True),
-                        ft.Text("بیشترین دسته بندی: ...", rtl=True),
+                ft.Container(
+                    ft.Column([
+                        ft.Text("ℹ️ درباره برنامه", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Text("مدیریت زمان حرفه‌ای v2.0"),
+                        ft.Text("طراحی شده برای بهبود بهره‌وری"),
                     ]),
                     padding=15
                 )
@@ -841,23 +1018,43 @@ class SettingsPage:
     
     def backup_data(self):
         import shutil
-        shutil.copy('tasks.db', f'tasks_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db')
-        self.page.snack_bar = ft.SnackBar(
-            ft.Text("✅ پشتیبان‌گیری انجام شد!"),
-            bgcolor=ft.Colors.GREEN_700
-        )
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        shutil.copy('advanced_tasks.db', f'backup_{timestamp}.db')
+        self.page.snack_bar = ft.SnackBar(ft.Text("✅ پشتیبان‌گیری شد!"))
         self.page.snack_bar.open = True
         self.page.update()
     
-    def restore_data(self):
-        self.page.snack_bar = ft.SnackBar(
-            ft.Text("⚠️ این قابلیت در حال توسعه است!"),
-            bgcolor=ft.Colors.ORANGE_700
+    def reset_data(self):
+        def confirm_reset():
+            import os
+            if os.path.exists('advanced_tasks.db'):
+                os.remove('advanced_tasks.db')
+            self.page.dialog.open = False
+            self.page.snack_bar = ft.SnackBar(ft.Text("🔄 داده‌ها ریست شدند!"))
+            self.page.snack_bar.open = True
+            self.page.update()
+            # ریستارت برنامه
+            self.page.clean()
+            self.build()
+        
+        dialog = ft.AlertDialog(
+            title=ft.Text("⚠️ تأیید ریست"),
+            content=ft.Text("آیا از حذف همه داده‌ها مطمئن هستید؟"),
+            actions=[
+                ft.TextButton("لغو", on_click=lambda _: self.close_dialog()),
+                ft.TextButton("ریست", on_click=lambda _: confirm_reset(), style=ft.ButtonStyle(color=ft.Colors.RED_700)),
+            ]
         )
-        self.page.snack_bar.open = True
+        self.page.dialog = dialog
+        dialog.open = True
         self.page.update()
+    
+    def close_dialog(self):
+        if self.page.dialog:
+            self.page.dialog.open = False
+            self.page.update()
 
-# ============= صفحه اصلی (با ناوبری) =============
+# ============= صفحه اصلی =============
 
 async def main(page: ft.Page):
     page.title = "مدیریت زمان حرفه‌ای"
@@ -871,35 +1068,43 @@ async def main(page: ft.Page):
     db = Database()
     task_manager = TaskManager(db)
     gamification = Gamification(db)
-    timer = PomodoroTimer(page, db)
+    habit_manager = HabitManager(db)
     
-    task_page = TaskPage(page, task_manager, gamification, db)
-    dashboard_page = DashboardPage(page, task_manager, gamification, timer, db)
-    calendar_page = CalendarPage(page, task_manager, db)
-    settings_page = SettingsPage(page, db)
+    pages = {
+        "داشبورد": DashboardPage(page, task_manager, gamification),
+        "کارها": TaskPage(page, task_manager, gamification, db),
+        "آیزنهاور": EisenhowerMatrixPage(page, task_manager),
+        "پومودورو": PomodoroPage(page, db, gamification),
+        "عادت‌ها": HabitTrackerPage(page, habit_manager, gamification),
+        "تمرکز": FocusModePage(page, db, gamification),
+        "انرژی": DailyEnergyPage(page, db),
+        "گزارش": ReportPage(page, task_manager, gamification),
+        "تنظیمات": SettingsPage(page, db, gamification)
+    }
+    
+    destinations = [
+        ft.NavigationDestination(icon="DASHBOARD", label="داشبورد"),
+        ft.NavigationDestination(icon="LIST_ALT", label="کارها"),
+        ft.NavigationDestination(icon="GRID_VIEW", label="آیزنهاور"),
+        ft.NavigationDestination(icon="TIMER", label="پومودورو"),
+        ft.NavigationDestination(icon="REPEAT", label="عادت‌ها"),
+        ft.NavigationDestination(icon="FOCUS_MODE", label="تمرکز"),
+        ft.NavigationDestination(icon="ENERGY_SAVINGS_LEAF", label="انرژی"),
+        ft.NavigationDestination(icon="BAR_CHART", label="گزارش"),
+        ft.NavigationDestination(icon="SETTINGS", label="تنظیمات"),
+    ]
+    
+    page_list = ["داشبورد", "کارها", "آیزنهاور", "پومودورو", "عادت‌ها", "تمرکز", "انرژی", "گزارش", "تنظیمات"]
     
     def change_page(e):
         page.controls.clear()
         page.add(nav_bar)
-        
-        if e.control.selected_index == 0:
-            page.add(dashboard_page.content if hasattr(dashboard_page, 'content') else dashboard_page)
-        elif e.control.selected_index == 1:
-            task_page.update_task_list()
-            page.add(task_page.content)
-        elif e.control.selected_index == 2:
-            page.add(calendar_page)
-        elif e.control.selected_index == 3:
-            page.add(settings_page)
+        label = page_list[e.control.selected_index]
+        page.add(pages[label])
         page.update()
     
     nav_bar = ft.NavigationBar(
-        destinations=[
-            ft.NavigationDestination(icon="DASHBOARD", label="داشبورد"),  # ✅ اصلاح شده
-            ft.NavigationDestination(icon="LIST_ALT", label="کارها"),  # ✅ اصلاح شده
-            ft.NavigationDestination(icon="CALENDAR_MONTH", label="تقویم"),  # ✅ اصلاح شده
-            ft.NavigationDestination(icon="SETTINGS", label="تنظیمات"),  # ✅ اصلاح شده
-        ],
+        destinations=destinations,
         selected_index=0,
         on_change=change_page,
         bgcolor=ft.Colors.WHITE,
@@ -907,7 +1112,7 @@ async def main(page: ft.Page):
     )
     
     page.add(nav_bar)
-    page.add(dashboard_page.content if hasattr(dashboard_page, 'content') else dashboard_page)
+    page.add(pages["داشبورد"])
     page.update()
 
 ft.app(target=main, assets_dir="assets")
