@@ -1,1 +1,52 @@
 
+name: ساخت APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+    - name: دریافت کد
+      uses: actions/checkout@v4
+
+    - name: تنظیم پایتون
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: نصب وابستگی‌ها
+      run: |
+        python -m pip install --upgrade pip
+        pip install flet
+        pip install persian-datepicker jdatetime
+
+    - name: تنظیم Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+        cache: 'gradle'
+
+    - name: تنظیم Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.29.2'
+
+    - name: ساخت APK
+      run: |
+        flutter config --no-analytics
+        flet build apk --verbose
+
+    - name: ذخیره فایل APK به عنوان خروجی
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-release
+        path: build/apk/
+        if-no-files-found: error
