@@ -144,7 +144,7 @@ async def main(page: ft.Page):
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
     page.scroll = ft.ScrollMode.AUTO
     page.padding = 20
-    page.rtl = True  # فعال‌سازی راست‌چین برای کل صفحه
+    page.rtl = True
     
     # ایجاد اشیاء اصلی
     task_manager = TaskManager()
@@ -449,9 +449,8 @@ async def main(page: ft.Page):
         dashboard_content.open = True
         page.update()
     
-    # ===== بخش تقویم (اصلاح شده) =====
+    # ===== بخش تقویم =====
     def show_calendar():
-        # نمایش تاریخ امروز به جای تقویم (برای جلوگیری از خطا)
         today = jdatetime.date.today().strftime("%Y/%m/%d")
         page.snack_bar = ft.SnackBar(ft.Text(f"📅 تاریخ امروز: {today}"))
         page.snack_bar.open = True
@@ -469,7 +468,6 @@ async def main(page: ft.Page):
     
     # ===== اضافه کردن همه بخش‌ها به صفحه =====
     
-    # دکمه‌های سریع
     quick_actions = ft.Row([
         ft.ElevatedButton("📊 داشبورد", on_click=lambda _: show_dashboard()),
         ft.ElevatedButton("📅 تقویم", on_click=lambda _: show_calendar()),
@@ -500,7 +498,6 @@ async def main(page: ft.Page):
             page.dialog.open = True
             page.update()
     
-    # ترکیب همه بخش‌ها
     page.add(
         top_bar,
         ft.Divider(height=10),
@@ -520,10 +517,8 @@ async def main(page: ft.Page):
         quick_actions,
     )
     
-    # بارگذاری اولیه
     update_task_list()
     
-    # به‌روزرسانی تایمر در پس‌زمینه
     def update_timer_display():
         while True:
             time.sleep(1)
@@ -532,5 +527,4 @@ async def main(page: ft.Page):
     
     threading.Thread(target=update_timer_display, daemon=True).start()
 
-# اجرای برنامه
 ft.app(target=main)
