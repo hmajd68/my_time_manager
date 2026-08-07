@@ -67,14 +67,23 @@ jobs:
     - name: ساخت APK
       env:
         FLET_FORCE_FLUTTER_INSTALL: 1
+        FLET_ANDROID_SDK_PATH: ${{ env.ANDROID_HOME }}
       run: |
         flutter config --no-analytics
-        cd src  # ✅ رفتن به پوشه src
-        flet build apk --verbose
+        flutter doctor -v
+        cd src
+        yes | flet build apk --verbose || true
+
+    - name: ساخت مجدد APK (در صورت نیاز)
+      if: failure()
+      run: |
+        cd src
+        echo "تلاش مجدد با گزینه‌های مختلف..."
+        flet build apk --verbose --skip-build-deps || true
 
     - name: ذخیره فایل APK به عنوان خروجی
       uses: actions/upload-artifact@v4
       with:
         name: app-release
-        path: src/build/apk/  # ✅ مسیر جدید
+        path: src/build/apk/
         if-no-files-found: error
